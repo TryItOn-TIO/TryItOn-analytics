@@ -28,7 +28,7 @@ def get_user_preferred_tags(user_id: int) -> list:
     preferred_tags = set()
 
     # 1. 프로필 preferred_style
-    cursor.execute("SELECT preferred_style FROM profile WHERE user_id = %s", (user_id,))
+    cursor.execute("SELECT preferred_style FROM profile WHERE member_user_id = %s", (user_id,))
     row = cursor.fetchone()
     if row and row["preferred_style"]:
         preferred_tags.add(row["preferred_style"])
@@ -41,29 +41,49 @@ def get_user_preferred_tags(user_id: int) -> list:
         preferred_tags.update(map_age_gender_to_tags(age, user["gender"]))
 
     # 3. 행동 기반 상품 태그 수집
-    behavior_tables = ['wishlist_item', 'cart_item', 'order_item']
-    product_ids = set()
-    for table in behavior_tables:
-        cursor.execute(f"SELECT product_id FROM {table} WHERE user_id = %s", (user_id,))
-        product_ids.update(row["product_id"] for row in cursor.fetchall())
-
-    # Tryon (avatar_item → avatar → user_id 매칭)
-    cursor.execute("""
-        SELECT ai.product_id FROM avatar_item ai
+    behavior_queries = {
+    "wishlist_item": """
+        SELECT wi.product_id
+        FROM wishlist_item wi
+        JOIN wishlist w ON wi.wishlist_id = w.wishlist_id
+        WHERE w.user_id = %s
+    """,
+    "cart_item": """
+        SELECT pv.product_id
+        FROM product_variant pv
+        JOIN cart_item ci ON ci.variant_id = pv.variant_id
+        JOIN cart c ON ci.cart_id = c.cart_id
+        WHERE c.user_id = %s
+    """,
+    "order_item": """
+        SELECT oi.product_id
+        FROM order_item oi
+        JOIN orders o ON oi.order_id = o.order_id
+        WHERE o.user_id = %s
+    """,
+    "avatar_item": """
+        SELECT ai.product_id
+        FROM avatar_item ai
         JOIN avatar a ON ai.avatar_id = a.avatar_id
         WHERE a.user_id = %s
-    """, (user_id,))
-    product_ids.update(row["product_id"] for row in cursor.fetchall())
+    """
+    }
+
+    product_ids = set()
+    for label, query in behavior_queries.items():
+        cursor.execute(query, (user_id,))
+        rows = cursor.fetchall()
+        product_ids.update(row.get("product_id") for row in rows if row.get("product_id") is not None)
 
     # 상품 ID → 태그
     tag_counter = Counter()
     for pid in product_ids:
         cursor.execute("""
-            SELECT t.name FROM tag t
+            SELECT t.tag_name FROM tag t
             JOIN product_tag pt ON pt.tag_id = t.tag_id
             WHERE pt.product_id = %s
         """, (pid,))
-        tag_counter.update(row["name"] for row in cursor.fetchall())
+        tag_counter.update(row["tag_name"] for row in cursor.fetchall())
 
     for tag, _ in tag_counter.most_common(3):
         preferred_tags.add(tag)

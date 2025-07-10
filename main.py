@@ -26,6 +26,7 @@ def trending(limit: int = 12):
 @app.get("/recommend/age-group")
 def recommend_by_age_group(range: str = "20s", gender: str = None, limit: int = 12):
     user_ids = get_users_by_age_range_and_gender(range, gender)
+    print("user_ids: ", user_ids)
     products = get_popular_products_by_users(user_ids, limit)
     return {
         "range": range,
