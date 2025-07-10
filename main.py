@@ -4,6 +4,10 @@ from user_profile import get_user_preferred_tags
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"message": "Hello TIO"}
+
 # 유저의 개인화 추천 상품 반환
 @app.get("/recommend/for-you")
 def recommend(user_id: int = Query(..., description="로그인한 유저의 ID")):
