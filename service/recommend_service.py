@@ -1,5 +1,7 @@
 from db import get_connection
 
+# --- 쿼리 기반 추천 로직 ---
+
 def recommend_by_tags(tags: list):
     if not tags:
         return []

@@ -1,13 +1,24 @@
 from fastapi import FastAPI, Query
-from service import *
 from user_profile import get_user_preferred_tags
+from repository import get_product_details
+from service.recommend_service import *
+from service.recommend_vector_service import VectorRecommender
 
 app = FastAPI()
+recommender = VectorRecommender()
 
 @app.get("/")
 async def root():
     return {"message": "Hello TIO"}
 
+# ---------------- 벡터 기반 ----------------
+@app.get("/recommend/hybrid")
+def hybrid(user_id: int = Query(...), top_n: int = Query(8)):
+    ids = recommender.recommend_by_user(user_id, top_n)
+    products = get_product_details(ids)
+    return {"user_id": user_id, "recommendations": products}
+
+# ---------------- 쿼리 기반 ----------------
 # 유저의 개인화 추천 상품 반환
 @app.get("/recommend/for-you")
 def recommend(user_id: int = Query(..., description="로그인한 유저의 ID")):
