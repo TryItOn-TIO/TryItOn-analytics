@@ -1,5 +1,7 @@
 from db import get_connection
 
+# --- 쿼리 기반 추천 로직 ---
+
 def recommend_by_tags(tags: list):
     if not tags:
         return []
@@ -13,7 +15,7 @@ def recommend_by_tags(tags: list):
         FROM product p
         JOIN product_tag pt ON p.product_id = pt.product_id
         JOIN tag t ON pt.tag_id = t.tag_id
-        WHERE t.name IN ({format_strings})
+        WHERE t.tag_name IN ({format_strings})
         GROUP BY p.product_id
         ORDER BY score DESC
         LIMIT 8;
@@ -70,22 +72,21 @@ def get_users_by_age_range_and_gender(age_range: str, gender: str = None) -> lis
     today = date.today()
 
     if age_range == "10s":
-        start_year, end_year = today.year - 19, today.year - 10
+        min_year, max_year = today.year - 19, today.year - 10
     elif age_range == "20s":
-        start_year, end_year = today.year - 29, today.year - 20
+        min_year, max_year = today.year - 29, today.year - 20
     elif age_range == "30s":
-        start_year, end_year = today.year - 39, today.year - 30
+        min_year, max_year = today.year - 39, today.year - 30
     elif age_range == "40s":
-        start_year, end_year = today.year - 49, today.year - 40
+        min_year, max_year = today.year - 49, today.year - 40
     else:
         return []
 
     conn = get_connection()
     cursor = conn.cursor()
 
-    # gender 필터링 조건 추가
     query = "SELECT user_id FROM member WHERE birth_date BETWEEN %s AND %s"
-    params = [f"{end_year}-01-01", f"{start_year}-12-31"]
+    params = [f"{min_year}-01-01", f"{max_year}-12-31"]
 
     if gender and gender in ["M", "F"]:
         query += " AND gender = %s"
@@ -93,6 +94,7 @@ def get_users_by_age_range_and_gender(age_range: str, gender: str = None) -> lis
 
     cursor.execute(query, params)
     user_ids = [row[0] for row in cursor.fetchall()]
+
     cursor.close()
     conn.close()
     return user_ids
@@ -105,34 +107,50 @@ def get_popular_products_by_users(user_ids: list, limit: int = 12):
     cursor = conn.cursor(dictionary=True)
 
     format_str = ','.join(['%s'] * len(user_ids))
+    print("format_str: ", format_str)
 
     # 행동 기반 상품 집계
     query = f"""
-        SELECT product_id, SUM(score) AS total_score
-        FROM (
-            SELECT product_id, COUNT(*) * 1 AS score FROM wishlist_item WHERE user_id IN ({format_str}) GROUP BY product_id
-            UNION ALL
-            SELECT product_id, COUNT(*) * 3 AS score FROM order_item WHERE order_id IN (
-                SELECT order_id FROM `order` WHERE user_id IN ({format_str})
-            ) GROUP BY product_id
-            UNION ALL
-            SELECT ai.product_id, COUNT(*) * 2 AS score
-            FROM avatar_item ai
-            JOIN avatar a ON ai.avatar_id = a.avatar_id
-            WHERE a.user_id IN ({format_str})
-            GROUP BY ai.product_id
-            UNION ALL
-            SELECT cai.product_id, COUNT(*) * 2 AS score
-            FROM closet_avatar_item cai
-            JOIN closet_avatar ca ON cai.closet_avatar_id = ca.closet_avatar_id
-            WHERE ca.user_id IN ({format_str})
-            GROUP BY cai.product_id
-        ) AS combined
-        GROUP BY product_id
-        ORDER BY total_score DESC
-        LIMIT %s
-    """
+    SELECT product_id, SUM(score) AS total_score
+    FROM (
+        -- 위시리스트 기반 점수 (1점)
+        SELECT wi.product_id, COUNT(*) * 1 AS score
+        FROM wishlist_item wi
+        JOIN wishlist w ON wi.wishlist_id = w.wishlist_id
+        WHERE w.user_id IN ({format_str})
+        GROUP BY wi.product_id
 
+        UNION ALL
+
+        -- 주문 기반 점수 (3점)
+        SELECT oi.product_id, COUNT(*) * 3 AS score
+        FROM order_item oi
+        JOIN orders o ON oi.order_id = o.order_id
+        WHERE o.user_id IN ({format_str})
+        GROUP BY oi.product_id
+
+        UNION ALL
+
+        -- 아바타 try-on 기반 점수 (2점)
+        SELECT ai.product_id, COUNT(*) * 2 AS score
+        FROM avatar_item ai
+        JOIN avatar a ON ai.avatar_id = a.avatar_id
+        WHERE a.user_id IN ({format_str})
+        GROUP BY ai.product_id
+
+        UNION ALL
+
+        -- 옷장 기반 try-on 점수 (2점)
+        SELECT cai.product_id, COUNT(*) * 2 AS score
+        FROM closet_avatar_item cai
+        JOIN closet_avatar ca ON cai.closet_avatar_id = ca.closet_avatar_id
+        WHERE ca.user_id IN ({format_str})
+        GROUP BY cai.product_id
+    ) AS combined
+    GROUP BY product_id
+    ORDER BY total_score DESC
+    LIMIT %s
+    """
     cursor.execute(query, user_ids * 4 + [limit])
     product_ids = [row["product_id"] for row in cursor.fetchall()]
 

@@ -50,5 +50,16 @@ pip install -r requirements.txt
 ### 4. 서버 실행
 
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
+
+### 5. 브라우저에서 확인
+
+1. http://127.0.0.1:8000 <br />
+   접속하여 서버 실행 확인
+
+2. http://127.0.0.1:8000/docs <br />
+   대화형 API 문서로 확인 (Swagger UI로 API 호출과 테스트 가능합니다.)
+
+3. http://127.0.0.1:8000/redoc <br />
+   문서 중심으로 확인
