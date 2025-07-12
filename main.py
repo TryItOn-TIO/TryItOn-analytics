@@ -1,8 +1,8 @@
 from fastapi import FastAPI, Query
 from user_profile import get_user_preferred_tags
-from repository import get_product_details
+from repository import get_product_details, get_category_map
 from service.recommend_service import *
-from service.recommend_vector_service import VectorRecommender
+from service.recommend_vector_service import VectorRecommender, diversify_by_category
 
 app = FastAPI()
 recommender = VectorRecommender()
@@ -14,8 +14,17 @@ async def root():
 # ---------------- 벡터 기반 ----------------
 @app.get("/recommend/hybrid")
 def hybrid(user_id: int = Query(...), top_n: int = Query(8)):
-    ids = recommender.recommend_by_user(user_id, top_n)
-    products = get_product_details(ids)
+    # 벡터 기반 추천으로 3배수의 상품 뽑기
+    candidate_ids = recommender.recommend_by_user(user_id, top_n * 3)
+
+    # 한 번에 카테고리 매핑 로드
+    cat_map = get_category_map(candidate_ids)
+
+    # 카테고리별 4개씩, 총 top_n개로 다양화
+    diversified = diversify_by_category(candidate_ids, cat_map, max_per_cat=4, top_n=top_n)
+
+    # 최종 상품 정보 조회
+    products = get_product_details(diversified)
     return {"user_id": user_id, "recommendations": products}
 
 # ---------------- 쿼리 기반 ----------------

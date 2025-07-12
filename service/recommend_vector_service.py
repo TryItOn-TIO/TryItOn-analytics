@@ -119,3 +119,25 @@ class VectorRecommender:
         recommended_ids = [self.product_ids[i] for i in top_indices]
         print(f"상위 {top_n}개\n", recommended_ids)
         return [self.product_ids[i] for i in top_indices]
+    
+def diversify_by_category(product_ids: list[int], category_map: dict[int,str], max_per_cat: int = 4, top_n: int = 8) -> list[int]: 
+    selected = []
+    counts = {}
+
+    # 카테고리 다양성을 확보한다.
+    for pid in product_ids:
+        cat = category_map.get(pid, "기타")
+        if counts.get(cat, 0) < max_per_cat:
+            selected.append(pid)
+            counts[cat] = counts.get(cat, 0) + 1
+        if len(selected) >= top_n:
+            return selected
+
+    # 부족분을 남은 후보로 채운다.
+    for pid in product_ids:
+        if pid not in selected:
+            selected.append(pid)
+        if len(selected) >= top_n:
+            break
+
+    return selected
