@@ -2,10 +2,15 @@ from fastapi import FastAPI, Query
 from user_profile import get_user_preferred_tags
 from repository import get_product_details, get_category_map
 from service.recommend_service import *
-from service.recommend_vector_service import VectorRecommender, diversify_by_category
+from service.recommend_vector_service import vector_recommender, diversify_by_category
+from service.collaborative_filtering_service import (
+    get_collaborative_recommendations,
+    get_category_diverse_recommendations,
+    get_hybrid_collaborative_recommendations,
+    collaborative_recommender
+)
 
 app = FastAPI()
-recommender = VectorRecommender()
 
 @app.get("/")
 async def root():
@@ -15,7 +20,7 @@ async def root():
 @app.get("/recommend/hybrid")
 def hybrid(user_id: int = Query(...), top_n: int = Query(8)):
     # 벡터 기반 추천으로 3배수의 상품 뽑기
-    candidate_ids = recommender.recommend_by_user(user_id, top_n * 3)
+    candidate_ids = vector_recommender.recommend_by_user(user_id, top_n * 3)
 
     # 한 번에 카테고리 매핑 로드
     cat_map = get_category_map(candidate_ids)
@@ -26,6 +31,46 @@ def hybrid(user_id: int = Query(...), top_n: int = Query(8)):
     # 최종 상품 정보 조회
     products = get_product_details(diversified)
     return {"user_id": user_id, "recommendations": products}
+
+# ---------------- 협업필터링 기반 ----------------
+# 협업필터링 기반 추천 상품 반환
+@app.get("/recommend/collaborative")
+def recommend_collaborative(user_id: int = Query(..., description="로그인한 유저의 ID"), top_n: int = Query(12, description="추천 상품 개수")):
+    products = get_collaborative_recommendations(user_id, top_n)
+    return {
+        "user_id": user_id,
+        "recommendation_type": "collaborative_filtering",
+        "products": products
+    }
+
+# 카테고리 다양성을 고려한 협업필터링 추천
+@app.get("/recommend/collaborative-diverse")
+def recommend_collaborative_diverse(user_id: int = Query(..., description="로그인한 유저의 ID"), top_n: int = Query(12, description="추천 상품 개수")):
+    products = get_category_diverse_recommendations(user_id, top_n)
+    return {
+        "user_id": user_id,
+        "recommendation_type": "collaborative_filtering_diverse",
+        "products": products
+    }
+
+# 하이브리드 협업필터링 추천 (협업필터링 + 콘텐츠 기반)
+@app.get("/recommend/hybrid-collaborative")
+def recommend_hybrid_collaborative(user_id: int = Query(..., description="로그인한 유저의 ID"), top_n: int = Query(12, description="추천 상품 개수")):
+    products = get_hybrid_collaborative_recommendations(user_id, top_n)
+    return {
+        "user_id": user_id,
+        "recommendation_type": "hybrid_collaborative",
+        "products": products
+    }
+
+# 협업필터링 캐시 초기화 (새로운 데이터가 추가되었을 때 사용)
+@app.post("/recommend/collaborative/clear-cache")
+def clear_collaborative_cache():
+    collaborative_recommender.clear_cache()
+    return {
+        "message": "Collaborative filtering cache cleared successfully",
+        "status": "success"
+    }
 
 # ---------------- 쿼리 기반 ----------------
 # 유저의 개인화 추천 상품 반환

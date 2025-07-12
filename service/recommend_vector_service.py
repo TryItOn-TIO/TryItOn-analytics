@@ -120,6 +120,11 @@ class VectorRecommender:
         print(f"상위 {top_n}개\n", recommended_ids)
         return [self.product_ids[i] for i in top_indices]
     
+
+
+vector_recommender = VectorRecommender()
+
+
 def diversify_by_category(product_ids: list[int], category_map: dict[int,str], max_per_cat: int = 4, top_n: int = 8) -> list[int]: 
     selected = []
     counts = {}

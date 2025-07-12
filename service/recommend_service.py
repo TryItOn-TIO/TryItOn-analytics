@@ -246,7 +246,7 @@ def get_products_similar_to_user_tryon(user_id: int, limit: int = 10):
         SELECT pt.product_id, COUNT(*) as match_count
         FROM product_tag pt
         WHERE pt.tag_id IN ({format_tags})
-          AND pt.product_id NOT IN ({format_ids})
+            AND pt.product_id NOT IN ({format_ids})
         GROUP BY pt.product_id
         ORDER BY match_count DESC
         LIMIT %s
