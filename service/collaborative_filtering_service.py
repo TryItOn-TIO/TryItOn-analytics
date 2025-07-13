@@ -74,7 +74,7 @@ class CollaborativeFilteringRecommender:
         self._matrix_built = True
         return True
     
-    # 사용자 간 유사도를 계산합니다 (코사인 유사도 사용)
+    # 사용자 간 유사도를 계산합니다 (행동 + 신체 정보 기반)
     def calculate_user_similarity(self):
         # 이미 계산된 경우 캐시된 결과 반환
         if self._similarity_calculated and self.user_similarity_matrix is not None:
@@ -83,19 +83,74 @@ class CollaborativeFilteringRecommender:
         if self.user_item_matrix is None:
             return False
             
-        # 정규화된 사용자-상품 행렬 계산
+        # 1. 행동 기반 유사도 계산
         user_norms = np.linalg.norm(self.user_item_matrix, axis=1, keepdims=True)
         user_norms[user_norms == 0] = 1  # 0으로 나누기 방지
         normalized_matrix = self.user_item_matrix / user_norms
+        behavior_similarity = np.dot(normalized_matrix, normalized_matrix.T)
         
-        # 코사인 유사도 계산
-        self.user_similarity_matrix = np.dot(normalized_matrix, normalized_matrix.T)
+        # 2. 신체 정보 기반 유사도 계산
+        physical_similarity = self._calculate_physical_similarity()
+        
+        print(f"[DEBUG] 행동 기반 유사도 범위: {np.min(behavior_similarity):.3f} ~ {np.max(behavior_similarity):.3f}")
+        print(f"[DEBUG] 신체 정보 기반 유사도 범위: {np.min(physical_similarity):.3f} ~ {np.max(physical_similarity):.3f}")
+        
+        # 3. 두 유사도를 결합 (행동 70%, 신체 정보 30%)
+        self.user_similarity_matrix = 0.7 * behavior_similarity + 0.3 * physical_similarity
+        
+        print(f"[DEBUG] 결합된 유사도 범위: {np.min(self.user_similarity_matrix):.3f} ~ {np.max(self.user_similarity_matrix):.3f}")
         
         # 자기 자신과의 유사도는 0으로 설정
         np.fill_diagonal(self.user_similarity_matrix, 0)
         
         self._similarity_calculated = True
         return True
+    
+    # 신체 정보 기반 사용자 유사도를 계산합니다
+    def _calculate_physical_similarity(self):
+        # 프로필 데이터 가져오기
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT member_user_id, height, weight, shoe_size, preferred_style
+            FROM profile
+            WHERE member_user_id IN ({})
+        """.format(','.join(['%s'] * len(self.user_ids))), self.user_ids)
+        
+        profile_data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # 프로필 데이터를 딕셔너리로 변환
+        profiles = {row['member_user_id']: row for row in profile_data}
+        
+        # 신체 정보 행렬 생성
+        n_users = len(self.user_ids)
+        physical_matrix = np.zeros((n_users, 4))  # height, weight, shoe_size, style
+        
+        for i, user_id in enumerate(self.user_ids):
+            if user_id in profiles:
+                profile = profiles[user_id]
+                physical_matrix[i, 0] = profile['height'] or 0
+                physical_matrix[i, 1] = profile['weight'] or 0
+                physical_matrix[i, 2] = profile['shoe_size'] or 0
+                # 스타일은 원핫 인코딩 대신 간단히 숫자로 매핑
+                style_mapping = {'CASUAL': 1, 'STREET': 2, 'HIPHOP': 3, 'CHIC': 4, 'FORMAL': 5, 'VINTAGE': 6}
+                physical_matrix[i, 3] = style_mapping.get(profile['preferred_style'], 0)
+        
+        # 정규화 (각 특성별로 정규화)
+        for j in range(physical_matrix.shape[1]):
+            col = physical_matrix[:, j]
+            if np.std(col) > 0:
+                physical_matrix[:, j] = (col - np.mean(col)) / np.std(col)
+        
+        # 코사인 유사도 계산
+        physical_norms = np.linalg.norm(physical_matrix, axis=1, keepdims=True)
+        physical_norms[physical_norms == 0] = 1
+        normalized_physical = physical_matrix / physical_norms
+        
+        return np.dot(normalized_physical, normalized_physical.T)
     
     # 캐시를 초기화합니다. 새로운 데이터가 추가되었을 때 호출합니다.
     def clear_cache(self):
