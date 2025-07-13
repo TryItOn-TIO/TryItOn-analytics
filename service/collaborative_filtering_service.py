@@ -466,10 +466,7 @@ def get_collaborative_recommendations(user_id: int, top_n: int = 12) -> List[Dic
     print("get_collaborative_recommendations: ", recommended_product_ids)
     
     if not recommended_product_ids:
-        print("[INFO] 협업필터링 추천이 없어서 인기 상품으로 대체합니다.")
-        # 협업필터링이 실패하면 인기 상품 추천
-        trending_products = get_trending_products(top_n)
-        return trending_products
+        return []
     
     return get_product_details(recommended_product_ids)
 
@@ -522,10 +519,8 @@ def get_profile_based_recommendations(user_id: int, top_n: int = 12) -> List[Dic
     return get_product_details(recommended_product_ids)
 
 
+# 프로필 기반과 행동 기반을 결합한 하이브리드 추천을 반환합니다.
 def get_hybrid_profile_recommendations(user_id: int, top_n: int = 12) -> List[Dict]:
-    """프로필 기반과 행동 기반을 결합한 하이브리드 추천을 반환합니다."""
-    from service.recommend_service import get_trending_products
-    
     # 프로필 기반 추천 (70%)
     profile_count = int(top_n * 0.7)
     profile_products = get_profile_based_recommendations(user_id, profile_count)
