@@ -7,6 +7,8 @@ from service.collaborative_filtering_service import (
     get_collaborative_recommendations,
     get_category_diverse_recommendations,
     get_hybrid_collaborative_recommendations,
+    get_profile_based_recommendations,
+    get_hybrid_profile_recommendations,
     collaborative_recommender
 )
 
@@ -70,6 +72,27 @@ def clear_collaborative_cache():
     return {
         "message": "Collaborative filtering cache cleared successfully",
         "status": "success"
+    }
+
+# ---------------- 프로필 기반 추천 ----------------
+# 프로필 기반 추천 상품 반환 (Cold Start 문제 해결)
+@app.get("/recommend/profile-based")
+def recommend_profile_based(user_id: int = Query(..., description="로그인한 유저의 ID"), top_n: int = Query(12, description="추천 상품 개수")):
+    products = get_profile_based_recommendations(user_id, top_n)
+    return {
+        "user_id": user_id,
+        "recommendation_type": "profile_based",
+        "products": products
+    }
+
+# 프로필 + 행동 기반 하이브리드 추천
+@app.get("/recommend/hybrid-profile")
+def recommend_hybrid_profile(user_id: int = Query(..., description="로그인한 유저의 ID"), top_n: int = Query(12, description="추천 상품 개수")):
+    products = get_hybrid_profile_recommendations(user_id, top_n)
+    return {
+        "user_id": user_id,
+        "recommendation_type": "hybrid_profile",
+        "products": products
     }
 
 # ---------------- 쿼리 기반 ----------------

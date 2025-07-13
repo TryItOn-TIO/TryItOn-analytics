@@ -333,8 +333,129 @@ class CollaborativeFilteringRecommender:
         return [product_id for product_id, _ in sorted_products[:top_n]]
 
 
+# Profile 기반 유사도 추천을 위한 새로운 클래스
+class ProfileBasedRecommender:
+    def __init__(self):
+        self.profile_matrix = None
+        self.user_ids = []
+        self.user_id_to_index = {}
+        self.index_to_user_id = {}
+        self._matrix_built = False
+        
+    # 모든 사용자의 프로필 정보를 행렬로 구축합니다.
+    def _build_profile_matrix(self):
+        if self._matrix_built and self.profile_matrix is not None:
+            return True
+            
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 모든 사용자의 프로필 정보를 가져옵니다
+        cursor.execute("""
+            SELECT member_user_id, height, weight, shoe_size, preferred_style
+            FROM profile
+            WHERE height IS NOT NULL AND weight IS NOT NULL
+        """)
+        
+        profile_data = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        if not profile_data:
+            return False
+            
+        # 사용자 ID 리스트 생성
+        self.user_ids = sorted([row['member_user_id'] for row in profile_data])
+        
+        # ID를 인덱스로 매핑
+        self.user_id_to_index = {user_id: idx for idx, user_id in enumerate(self.user_ids)}
+        self.index_to_user_id = {idx: user_id for user_id, idx in self.user_id_to_index.items()}
+        
+        # 프로필 행렬 생성 (height, weight, shoe_size, style)
+        n_users = len(self.user_ids)
+        self.profile_matrix = np.zeros((n_users, 4))
+        
+        # 스타일 매핑
+        style_mapping = {'CASUAL': 1, 'STREET': 2, 'HIPHOP': 3, 'CHIC': 4, 'FORMAL': 5, 'VINTAGE': 6}
+        
+        for row in profile_data:
+            user_idx = self.user_id_to_index[row['member_user_id']]
+            self.profile_matrix[user_idx, 0] = row['height'] or 0
+            self.profile_matrix[user_idx, 1] = row['weight'] or 0
+            self.profile_matrix[user_idx, 2] = row['shoe_size'] or 0
+            self.profile_matrix[user_idx, 3] = style_mapping.get(row['preferred_style'], 0)
+        
+        # 정규화 (각 특성별로 정규화)
+        for j in range(self.profile_matrix.shape[1]):
+            col = self.profile_matrix[:, j]
+            if np.std(col) > 0:
+                self.profile_matrix[:, j] = (col - np.mean(col)) / np.std(col)
+        
+        self._matrix_built = True
+        return True
+    
+    # 프로필 기반으로 유사한 사용자들을 찾습니다.
+    def get_similar_users_by_profile(self, user_id: int, top_k: int = 10) -> List[Tuple[int, float]]:
+        if not self._build_profile_matrix():
+            return []
+            
+        if user_id not in self.user_id_to_index:
+            return []
+            
+        user_idx = self.user_id_to_index[user_id]
+        user_profile = self.profile_matrix[user_idx].reshape(1, -1)
+        
+        # 모든 사용자와의 코사인 유사도 계산
+        similarities = []
+        for i, other_user_id in enumerate(self.user_ids):
+            if i != user_idx:  # 자기 자신 제외
+                other_profile = self.profile_matrix[i].reshape(1, -1)
+                similarity = np.dot(user_profile, other_profile.T)[0, 0]
+                similarities.append((other_user_id, similarity))
+        
+        # 유사도 순으로 정렬
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        return similarities[:top_k]
+    
+    # 프로필 기반 추천 상품을 반환합니다.
+    def get_profile_based_recommendations(self, user_id: int, top_n: int = 12) -> List[int]:
+        # 유사한 사용자들 찾기
+        similar_users = self.get_similar_users_by_profile(user_id, top_k=20)
+        
+        if not similar_users:
+            return []
+        
+        # 유사한 사용자들이 구매한 상품들 수집
+        conn = get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        similar_user_ids = [user_id for user_id, _ in similar_users]
+        placeholder = ','.join(['%s'] * len(similar_user_ids))
+        
+        cursor.execute(f"""
+            SELECT product_id, COUNT(*) as purchase_count
+            FROM recommend_behavior_log
+            WHERE user_id IN ({placeholder})
+            GROUP BY product_id
+            ORDER BY purchase_count DESC
+        """, similar_user_ids)
+        
+        product_counts = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # 상품 ID 리스트 반환
+        return [row['product_id'] for row in product_counts[:top_n]]
+    
+    # 캐시를 초기화합니다.
+    def clear_cache(self):
+        self.profile_matrix = None
+        self._matrix_built = False
+
+
 # 전역 인스턴스
 collaborative_recommender = CollaborativeFilteringRecommender()
+profile_recommender = ProfileBasedRecommender()
 
 
 # 협업필터링 기반 추천 상품을 반환합니다.
@@ -382,5 +503,39 @@ def get_hybrid_collaborative_recommendations(user_id: int, top_n: int = 12) -> L
     # 결과 합치기
     hybrid_products = collaborative_products + content_products
     print("전체: ", hybrid_products)
+    
+    return hybrid_products[:top_n] 
+
+
+# 프로필 기반 추천 상품을 반환합니다.
+def get_profile_based_recommendations(user_id: int, top_n: int = 12) -> List[Dict]:
+    from repository import get_product_details
+    
+    recommended_product_ids = profile_recommender.get_profile_based_recommendations(
+        user_id, top_n
+    )
+    print(f"[DEBUG] 프로필 기반 추천 상품 ID: {recommended_product_ids}")
+    
+    if not recommended_product_ids:
+        return []
+    
+    return get_product_details(recommended_product_ids)
+
+
+def get_hybrid_profile_recommendations(user_id: int, top_n: int = 12) -> List[Dict]:
+    """프로필 기반과 행동 기반을 결합한 하이브리드 추천을 반환합니다."""
+    from service.recommend_service import get_trending_products
+    
+    # 프로필 기반 추천 (70%)
+    profile_count = int(top_n * 0.7)
+    profile_products = get_profile_based_recommendations(user_id, profile_count)
+    
+    # 행동 기반 협업필터링 추천 (30%)
+    behavior_count = top_n - profile_count
+    behavior_products = get_collaborative_recommendations(user_id, behavior_count)
+    
+    # 결과 합치기
+    hybrid_products = profile_products + behavior_products
+    print(f"[DEBUG] 하이브리드 추천 - 프로필: {len(profile_products)}, 행동: {len(behavior_products)}")
     
     return hybrid_products[:top_n] 
