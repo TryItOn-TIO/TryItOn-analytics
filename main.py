@@ -1,65 +1,66 @@
 from fastapi import FastAPI, Query
-from user_profile import get_user_preferred_tags
-from repository import get_product_details
-from service.recommend_service import *
-from service.recommend_vector_service import VectorRecommender
+from redis_client import get_recommendation_from_redis
 
 app = FastAPI()
-recommender = VectorRecommender()
 
 @app.get("/")
 async def root():
     return {"message": "Hello TIO"}
 
-# ---------------- 벡터 기반 ----------------
-@app.get("/recommend/hybrid")
-def hybrid(user_id: int = Query(...), top_n: int = Query(8)):
-    ids = recommender.recommend_by_user(user_id, top_n)
-    products = get_product_details(ids)
-    return {"user_id": user_id, "recommendations": products}
-
-# ---------------- 쿼리 기반 ----------------
-# 유저의 개인화 추천 상품 반환
-@app.get("/recommend/for-you")
-def recommend(user_id: int = Query(..., description="로그인한 유저의 ID")):
-    preferred_tags = get_user_preferred_tags(user_id)
-    print(f"[INFO] user {user_id} → preferred_tags: {preferred_tags}")
-    recommended_products = recommend_by_tags(preferred_tags)
-    return {"user_id": user_id, "tags": preferred_tags, "products": recommended_products}
-
-# 전체 인기 상품 반환
-@app.get("/recommend/trending")
-def trending(limit: int = 12):
-    trending_items = get_trending_products(limit=limit)
-    return {"products": trending_items}
-
-# 연령대별 인기 상품 반환
-@app.get("/recommend/age-group")
-def recommend_by_age_group(range: str = "20s", gender: str = None, limit: int = 12):
-    user_ids = get_users_by_age_range_and_gender(range, gender)
-    print("user_ids: ", user_ids)
-    products = get_popular_products_by_users(user_ids, limit)
+# 1. 메인 페이지 개인화 추천 상품 (종합 로직)
+@app.get("/api/recommend/for-you")
+def recommend_for_you(user_id: int = Query(..., description="로그인한 유저의 ID"), limit: int = Query(12, description="추천 상품 개수")):
+    key = f"recommend:for_you:{user_id}"
+    products = get_recommendation_from_redis(key)[:limit]
     return {
-        "range": range,
-        "gender": gender,
-        "user_count": len(user_ids),
+        "user_id": user_id,
+        "recommendation_type": "hybrid_profile_behavior",
         "products": products
     }
 
-# 특정 상품 기반 유사 상품 반환
-@app.get("/recommend/similar-to/{product_id}")
-def recommend_similar(product_id: int, limit: int = 8):
-    products = get_similar_products(product_id, limit)
+# 2. 메인 페이지 전체 인기 상품
+@app.get("/api/recommend/trending")
+def trending(limit: int = Query(12, description="추천 상품 개수")):
+    key = "recommend:trending"
+    products = get_recommendation_from_redis(key)[:limit]
+    return {
+        "recommendation_type": "trending",
+        "products": products
+    }
+
+# 3. 연령대별 인기 상품
+@app.get("/api/recommend/age-group")
+def recommend_by_age_group(range: str = Query("20s", description="연령대 (10s, 20s, 30s, 40s)"), 
+                            gender: str = Query(None, description="성별 (M, F)"), 
+                            limit: int = Query(12, description="추천 상품 개수")):
+    key = f"recommend:age_group:{range}:{gender or 'all'}"
+    products = get_recommendation_from_redis(key)[:limit]
+    return {
+        "range": range,
+        "gender": gender,
+        "recommendation_type": "age_group_popular",
+        "products": products
+    }
+
+# 4. 상세 상품 기반 유사 상품
+@app.get("/api/recommend/similar-to/{product_id}")
+def recommend_similar(product_id: int, limit: int = Query(8, description="추천 상품 개수")):
+    key = f"recommend:similar_to:{product_id}"
+    products = get_recommendation_from_redis(key)[:limit]
     return {
         "base_product_id": product_id,
+        "recommendation_type": "similar_tags",
         "similar_products": products
     }
 
-#  try-on한 착장과 유사한 상품 반환
-@app.get("/recommend/tryon-based")
-def recommend_tryon_based(user_id: int, limit: int = 10):
-    products = get_products_similar_to_user_tryon(user_id, limit)
+# 5. Try-on 기반 추천
+@app.get("/api/recommend/tryon-based")
+def recommend_tryon_based(user_id: int = Query(..., description="로그인한 유저의 ID"), 
+                            limit: int = Query(10, description="추천 상품 개수")):
+    key = f"recommend:tryon_based:{user_id}"
+    products = get_recommendation_from_redis(key)[:limit]
     return {
         "user_id": user_id,
+        "recommendation_type": "tryon_based",
         "products": products
     }

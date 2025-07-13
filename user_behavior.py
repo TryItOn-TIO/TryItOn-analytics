@@ -4,16 +4,33 @@ from db import get_connection
 def get_user_behavior_logs(user_id: int) -> list[tuple[str, float]]:
     conn = get_connection()
     cursor = conn.cursor(dictionary=True)
+
+    # 태그별 점수 집계
     cursor.execute("""
-        SELECT t.tag_name, SUM(r.score) AS total_score
+        SELECT t.tag_name AS name, SUM(r.score) AS total_score
         FROM recommend_behavior_log r
         JOIN product_tag pt ON r.product_id = pt.product_id
         JOIN tag t ON pt.tag_id = t.tag_id
         WHERE r.user_id = %s
         GROUP BY t.tag_name
     """, (user_id,))
-    rows = cursor.fetchall()
+    tag_rows = cursor.fetchall()
+
+    # 카테고리별 점수 집계
+    cursor.execute("""
+        SELECT c.category_name AS name, SUM(r.score) AS total_score
+        FROM recommend_behavior_log r
+        JOIN product p ON r.product_id = p.product_id
+        JOIN category c ON p.category_id = c.category_id
+        WHERE r.user_id = %s
+        GROUP BY c.category_name
+    """, (user_id,))
+    cat_rows = cursor.fetchall()
+
     cursor.close()
     conn.close()
-    # (tag, score) 리스트로 반환
-    return [(row["tag_name"], row["total_score"]) for row in rows]
+
+    # 합쳐서 (이름, 점수) 리스트로 반환
+    combined = [(row["name"], row["total_score"]) for row in tag_rows]
+    combined += [(row["name"], row["total_score"]) for row in cat_rows]
+    return combined
